@@ -1,0 +1,126 @@
+import base64
+from datetime import datetime
+from io import BytesIO
+
+import eventlet.wsgi
+import numpy as np
+import socketio
+from PIL import Image
+from colorama import Fore
+from flask import Flask
+from flask_cors import CORS
+from keras.models import load_model
+from adversarial_driving import AdversarialDriving
+from logger import TensorBoardLogger
+import utils
+
+np.set_printoptions(suppress=True)
+log_dir = 'logs/' + datetime.now().strftime("%Y%m%d-%H%M%S")
+tb = TensorBoardLogger(log_dir)
+sio = socketio.Server(cors_allowed_origins='*')
+
+app = Flask(__name__)
+CORS(app)
+MAX_SPEED = 20
+MIN_SPEED = 10
+global counter
+counter = 0
+EPSILON = 1
+APPLY_ATTACK = True
+speed_limit = MAX_SPEED
+
+
+def img2base64(image):
+    origin_img = Image.fromarray(np.uint8(image))
+    origin_buff = BytesIO()
+    origin_img.save(origin_buff, format="JPEG")
+    return base64.b64encode(origin_buff.getvalue()).decode("utf-8")
+
+
+@sio.on('connect')
+def connect(sid, environ):
+    print("connect ", sid)
+    send_control(0, 0)
+
+
+@sio.on('attack')
+def onAttack(sid, data):
+    adv_drv.init(data["type"], int(data["attack"]))
+
+
+@sio.on('telemetry')
+def telemetry(sid, data):
+    if data:
+        speed = float(data["speed"])
+        sio.emit('update', {'data': data["image"], 'speed': data["speed"]})
+        image = Image.open(BytesIO(base64.b64decode(data["image"])))
+        try:
+            image = np.asarray(image)
+            image = utils.preprocess(image)
+            sio.emit('input', {'data': img2base64(image)})
+            y_true = model.predict(np.array([image]), batch_size=1)
+            if adv_drv.activate:
+                perturb = adv_drv.attack(image)
+                if perturb is not None:
+                    x_adv = np.array(image) + perturb
+                    sio.emit('adv', {'data': img2base64(x_adv)})
+                    sio.emit('diff', {'data': img2base64(perturb)})
+                    y_adv = float(model.predict(np.array([x_adv]), batch_size=1))
+                    sio.emit('res', {'original': str(float(y_true)), 'result': str(float(y_adv)),
+                                     'percentage': str(float(((y_true - y_adv) * 100 / np.abs(y_true))))})
+                    tb.log_scalar('y_true', float(y_true), telemetry.count)
+                    tb.log_scalar('y_adv', float(y_adv), telemetry.count)
+                    tb.log_scalar('y_diff', float(y_adv - y_true), telemetry.count)
+                    if APPLY_ATTACK:
+                        image = np.array([x_adv])
+                    else:
+                        image = np.array([image])
+                else:
+                    print("The attack method returns None")
+                    image = np.array([image])
+                telemetry.count = telemetry.count + 1
+            else:
+                image = np.array([image])
+            steering_angle = float(model.predict(image, batch_size=1))
+            global speed_limit, counter
+            if speed > speed_limit:
+                speed_limit = MIN_SPEED
+            else:
+                speed_limit = MAX_SPEED
+            throttle = 1.0 - steering_angle ** 2 - (speed / speed_limit) ** 2
+            counter += 1
+            if counter % 20 == 0:
+                if not adv_drv.activate:
+                    print(Fore.WHITE + 'Steering angle: {}, Throttle: {}, Speed: {}'.format(round(steering_angle, 3),
+                                                                                            round(throttle, 2),
+                                                                                            round(speed, 1)))
+                elif adv_drv.attack_type == 'image_specific_left':
+                    print(Fore.RED + 'Steering angle: {}, Throttle: {}, Speed: {}'.format(round(steering_angle, 3),
+                                                                                          round(throttle, 2),
+                                                                                          round(speed, 1)))
+                elif adv_drv.attack_type == 'image_specific_right':
+                    print(Fore.GREEN + 'Steering angle: {}, Throttle: {}, Speed: {}'.format(round(steering_angle, 3),
+                                                                                            round(throttle, 2),
+                                                                                            round(speed, 1)))
+                elif adv_drv.attack_type == 'random':
+                    print(Fore.YELLOW + 'Steering angle: {}, Throttle: {}, Speed: {}'.format(round(steering_angle, 3),
+                                                                                             round(throttle, 2),
+                                                                                             round(speed, 1)))
+            send_control(steering_angle, throttle)
+        except Exception as e:
+            print(e)
+    else:
+        sio.emit('manual', data={}, skip_sid=True)
+
+
+def send_control(steering_angle, throttle):
+    sio.emit("steer", data={'steering_angle': steering_angle.__str__(),'throttle': throttle.__str__()}, skip_sid=True)
+
+
+if __name__ == '__main__':
+    telemetry.count = 0
+    model = load_model('model.h5')
+    model.summary()
+    adv_drv = AdversarialDriving(model, epsilon=EPSILON)
+    app = socketio.Middleware(sio, app)
+    eventlet.wsgi.server(eventlet.listen(('', 4567)), app)
