@@ -1,12 +1,13 @@
 import base64
 import os
-from datetime import datetime
 from io import BytesIO
-import tensorflow as tf
+
 import cv2
+import pandas as pd
+import tensorflow as tf
+
 import configuration
 from configuration import ConfigParser
-import pandas as pd
 
 tf.compat.v1.disable_eager_execution()
 import keras.backend as K
@@ -32,46 +33,26 @@ APPLY_ATTACK = True
 speed_limit = MAX_SPEED
 
 
-class AdversarialDriving:
-    def __init__(self, model, epsilon=1):
+class myAttacker:
+    def __init__(self, model, activate, attack_type, epsilon=1):
         self.model = model
-        self.attack_type = None
-        self.activate = False
-        self.loss = K.mean(-self.model.output, axis=-1)
-        self.grads = K.gradients(self.loss, self.model.input)
-        self.delta = K.sign(self.grads[0])
-        self.sess = tf.compat.v1.keras.backend.get_session()
-        self.perturb = 0
-        self.perturbs = []
-        self.perturb_percent = 0
-        self.perturb_percents = []
-        self.n_attack = 1
-        self.epsilon = epsilon
-
-    def reset(self, attack_type, activate):
-        # Reset Training Process
-        if self.attack_type != attack_type:
-            self.perturb = 0
-            self.perturbs = []
-            self.perturb_percent = 0
-            self.perturb_percents = []
-            self.n_attack = 1
         self.attack_type = attack_type
+        self.activate = activate
+        self.sess = tf.compat.v1.keras.backend.get_session()
+        self.epsilon = epsilon
         if activate == 1:
             self.activate = True
-            print("Attacker:", attack_type)
         else:
             self.activate = False
-            print("No Attack")
-            if attack_type == "turn_left":
-                self.loss = -self.model.output
-            if attack_type == "turn_right":
-                self.loss = self.model.output
-            self.grads = K.gradients(self.loss, self.model.input)
-            self.delta = K.sign(self.grads[0])
-            print("Initialized", attack_type)
+        self.attack_type = attack_type
+        if attack_type == "turn_left":
+            self.loss = -self.model.output
+        if attack_type == "turn_right":
+            self.loss = self.model.output
+        self.grads = K.gradients(self.loss, self.model.input)
+        self.delta = K.sign(self.grads[0])
 
-    def attack(self, input):
+    def run(self, input):
         if self.attack_type == "random":
             noise = (np.random.randint(2, size=(160, 320, 3)) - 1) * self.epsilon
             return noise
@@ -116,7 +97,7 @@ def telemetry(sid, data):
             sio.emit('input', {'data': img2base64(image)})
             y_true = model.predict(np.array([image]), batch_size=1)
             if adv_drv.activate:
-                perturb = adv_drv.attack(image)
+                perturb = adv_drv.run(image)
                 if perturb is not None:
                     x_adv = np.array(image) + perturb
                     sio.emit('adv', {'data': img2base64(x_adv)})
@@ -187,7 +168,6 @@ if __name__ == '__main__':
     model.summary()
     attack = config['Attack']['active']
     attack_type = config['Attack']['type']
-    adv_drv = AdversarialDriving(model, epsilon=EPSILON)
-    adv_drv.reset(attack_type, int(attack))
+    adv_drv = myAttacker(model, activate=int(attack), attack_type=attack_type, epsilon=EPSILON)
     app = socketio.Middleware(sio, app)
     eventlet.wsgi.server(eventlet.listen(('', 4567)), app)
