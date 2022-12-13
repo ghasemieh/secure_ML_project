@@ -24,13 +24,11 @@ sio = socketio.Server(cors_allowed_origins='*')
 
 app = Flask(__name__)
 CORS(app)
-MAX_SPEED = 20
-MIN_SPEED = 10
 global counter
 counter = 0
 EPSILON = 1
 APPLY_ATTACK = True
-speed_limit = MAX_SPEED
+speed_limit = 20
 file_path = "record.csv"
 
 
@@ -122,9 +120,9 @@ def telemetry(sid, data):
         steering_angle = float(model.predict(image, batch_size=1))
         global speed_limit, counter
         if speed > speed_limit:
-            speed_limit = MIN_SPEED
+            speed_limit = 10
         else:
-            speed_limit = MAX_SPEED
+            speed_limit = 20
         throttle = 1.0 - steering_angle ** 2 - (speed / speed_limit) ** 2
         counter += 1
         if counter % 1 == 0:

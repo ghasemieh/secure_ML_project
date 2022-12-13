@@ -24,4 +24,5 @@ python3 app.py ACTIVE_PROFILE=dev
 Once the application starts the car starts moving and based on the configuration in config file it acts.
 
 #### 7) The generated result is getting store in record.csv file
+#### 8) During the execution, it is not possible to change the configuration. You should stop and start the app.
 
