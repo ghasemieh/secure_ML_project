@@ -1,11 +1,12 @@
 import base64
+import os
 from datetime import datetime
 from io import BytesIO
 import tensorflow as tf
 import cv2
 import configuration
 from configuration import ConfigParser
-
+import pandas as pd
 tf.compat.v1.disable_eager_execution()
 import keras.backend as K
 import eventlet.wsgi
@@ -16,11 +17,9 @@ from colorama import Fore
 from flask import Flask
 from flask_cors import CORS
 from keras.models import load_model
-from logger import TensorBoardLogger
 
 np.set_printoptions(suppress=True)
 log_dir = 'logs/' + datetime.now().strftime("%Y%m%d-%H%M%S")
-tb = TensorBoardLogger(log_dir)
 sio = socketio.Server(cors_allowed_origins='*')
 
 app = Flask(__name__)
@@ -48,12 +47,9 @@ class AdversarialDriving:
         self.perturb_percent = 0
         self.perturb_percents = []
         self.n_attack = 1
-        self.lr = 0.0002
         self.epsilon = epsilon
-        self.xi = 4
-        self.result = {}
 
-    def init(self, attack_type, activate):
+    def reset(self, attack_type, activate):
         # Reset Training Process
         if self.attack_type != attack_type:
             self.perturb = 0
@@ -68,9 +64,9 @@ class AdversarialDriving:
         else:
             self.activate = False
             print("No Attack")
-            if attack_type == "image_specific_left":
+            if attack_type == "turn_left":
                 self.loss = -self.model.output
-            if attack_type == "image_specific_right":
+            if attack_type == "turn_right":
                 self.loss = self.model.output
             self.grads = K.gradients(self.loss, self.model.input)
             self.delta = K.sign(self.grads[0])
@@ -81,7 +77,7 @@ class AdversarialDriving:
             noise = (np.random.randint(2, size=(160, 320, 3)) - 1) * self.epsilon
             return noise
 
-        if self.attack_type.startswith("image_specific_"):
+        if self.attack_type.startswith("turn_"):
             noise = self.epsilon * self.sess.run(self.delta, feed_dict={self.model.input: np.array([input])})
             return noise.reshape(160, 320, 3)
 
@@ -105,7 +101,7 @@ def preprocess(image):
     image = cv2.cvtColor(image, cv2.COLOR_RGB2YUV)
     return image
 
-
+file_path = "record.csv"
 @sio.on('telemetry')
 def telemetry(sid, data):
     if data:
@@ -126,9 +122,12 @@ def telemetry(sid, data):
                     y_adv = float(model.predict(np.array([x_adv]), batch_size=1))
                     sio.emit('res', {'original': str(float(y_true)), 'result': str(float(y_adv)),
                                      'percentage': str(float(((y_true - y_adv) * 100 / np.abs(y_true))))})
-                    tb.log_scalar('y_true', float(y_true), telemetry.count)
-                    tb.log_scalar('y_adv', float(y_adv), telemetry.count)
-                    tb.log_scalar('y_diff', float(y_adv - y_true), telemetry.count)
+                    df = pd.DataFrame(data=[[y_true[0][0], y_adv, y_adv - y_true[0][0]]], columns=["y_true", "y_adv", "y_diff"])
+                    if os.path.isfile(file_path):
+                        df.to_csv(file_path, mode='a', header=False, index=False)
+                    else:
+                        df.to_csv(file_path, header=True, index=False)
+
                     if APPLY_ATTACK:
                         image = np.array([x_adv])
                     else:
@@ -152,11 +151,11 @@ def telemetry(sid, data):
                     print(Fore.WHITE + 'Steering angle: {}, Throttle: {}, Speed: {}'.format(round(steering_angle, 3),
                                                                                             round(throttle, 2),
                                                                                             round(speed, 1)))
-                elif adv_drv.attack_type == 'image_specific_left':
+                elif adv_drv.attack_type == 'turn_left':
                     print(Fore.RED + 'Steering angle: {}, Throttle: {}, Speed: {}'.format(round(steering_angle, 3),
                                                                                           round(throttle, 2),
                                                                                           round(speed, 1)))
-                elif adv_drv.attack_type == 'image_specific_right':
+                elif adv_drv.attack_type == 'turn_right':
                     print(Fore.GREEN + 'Steering angle: {}, Throttle: {}, Speed: {}'.format(round(steering_angle, 3),
                                                                                             round(throttle, 2),
                                                                                             round(speed, 1)))
@@ -185,6 +184,6 @@ if __name__ == '__main__':
     attack = config['Attack']['active']
     attack_type = config['Attack']['type']
     adv_drv = AdversarialDriving(model, epsilon=EPSILON)
-    adv_drv.init(attack_type, int(attack))
+    adv_drv.reset(attack_type, int(attack))
     app = socketio.Middleware(sio, app)
     eventlet.wsgi.server(eventlet.listen(('', 4567)), app)
