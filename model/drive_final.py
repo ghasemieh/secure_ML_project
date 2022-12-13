@@ -1,7 +1,12 @@
 import base64
 from datetime import datetime
 from io import BytesIO
-
+import tensorflow as tf
+import cv2
+import configuration
+from configuration import ConfigParser
+tf.compat.v1.disable_eager_execution()
+import keras.backend as K
 import eventlet.wsgi
 import numpy as np
 import socketio
@@ -10,9 +15,7 @@ from colorama import Fore
 from flask import Flask
 from flask_cors import CORS
 from keras.models import load_model
-from adversarial_driving import AdversarialDriving
 from logger import TensorBoardLogger
-import utils
 
 np.set_printoptions(suppress=True)
 log_dir = 'logs/' + datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -30,6 +33,59 @@ APPLY_ATTACK = True
 speed_limit = MAX_SPEED
 
 
+class AdversarialDriving:
+    def __init__(self, model, epsilon=1):
+        self.model = model
+        self.attack_type = None
+        self.activate = False
+        self.loss = K.mean(-self.model.output, axis=-1)
+        self.grads = K.gradients(self.loss, self.model.input)
+        self.delta = K.sign(self.grads[0])
+        self.sess = tf.compat.v1.keras.backend.get_session()
+        self.perturb = 0
+        self.perturbs = []
+        self.perturb_percent = 0
+        self.perturb_percents = []
+        self.n_attack = 1
+        self.lr = 0.0002
+        self.epsilon = epsilon
+        self.xi = 4
+        self.result = {}
+
+    def init(self, attack_type, activate):
+        # Reset Training Process
+        if self.attack_type != attack_type:
+            self.perturb = 0
+            self.perturbs = []
+            self.perturb_percent = 0
+            self.perturb_percents = []
+            self.n_attack = 1
+        self.attack_type = attack_type
+        if activate == 1:
+            self.activate = True
+            print("Attacker:", attack_type)
+        else:
+            self.activate = False
+            print("No Attack")
+            if attack_type == "image_specific_left":
+                self.loss = -self.model.output
+            if attack_type == "image_specific_right":
+                self.loss = self.model.output
+            self.grads = K.gradients(self.loss, self.model.input)
+            self.delta = K.sign(self.grads[0])
+            print("Initialized", attack_type)
+
+    def attack(self, input):
+        if self.attack_type == "random":
+            # Random Noises [-epsilon, +epsilon]
+            noise = (np.random.randint(2, size=(160, 320, 3)) - 1) * self.epsilon
+            return noise
+
+        if self.attack_type.startswith("image_specific_"):
+            noise = self.epsilon * self.sess.run(self.delta, feed_dict={self.model.input: np.array([input])})
+            return noise.reshape(160, 320, 3)
+
+
 def img2base64(image):
     origin_img = Image.fromarray(np.uint8(image))
     origin_buff = BytesIO()
@@ -43,9 +99,16 @@ def connect(sid, environ):
     send_control(0, 0)
 
 
-@sio.on('attack')
-def onAttack(sid, data):
-    adv_drv.init(data["type"], int(data["attack"]))
+# @sio.on('attack')
+# def onAttack(sid, data):
+#     adv_drv.init(data["type"], int(data["attack"]))
+
+
+def preprocess(image):
+    image = image[60:-25, :, :]
+    image = cv2.resize(image, (320, 160), cv2.INTER_AREA)
+    image = cv2.cvtColor(image, cv2.COLOR_RGB2YUV)
+    return image
 
 
 @sio.on('telemetry')
@@ -56,7 +119,7 @@ def telemetry(sid, data):
         image = Image.open(BytesIO(base64.b64decode(data["image"])))
         try:
             image = np.asarray(image)
-            image = utils.preprocess(image)
+            image = preprocess(image)
             sio.emit('input', {'data': img2base64(image)})
             y_true = model.predict(np.array([image]), batch_size=1)
             if adv_drv.activate:
@@ -89,7 +152,7 @@ def telemetry(sid, data):
                 speed_limit = MAX_SPEED
             throttle = 1.0 - steering_angle ** 2 - (speed / speed_limit) ** 2
             counter += 1
-            if counter % 20 == 0:
+            if counter % 1 == 0:
                 if not adv_drv.activate:
                     print(Fore.WHITE + 'Steering angle: {}, Throttle: {}, Speed: {}'.format(round(steering_angle, 3),
                                                                                             round(throttle, 2),
@@ -114,13 +177,19 @@ def telemetry(sid, data):
 
 
 def send_control(steering_angle, throttle):
-    sio.emit("steer", data={'steering_angle': steering_angle.__str__(),'throttle': throttle.__str__()}, skip_sid=True)
+    sio.emit("steer", data={'steering_angle': steering_angle.__str__(), 'throttle': throttle.__str__()}, skip_sid=True)
 
 
 if __name__ == '__main__':
+    config: ConfigParser = configuration.get()
+
     telemetry.count = 0
-    model = load_model('model.h5')
+    model = load_model('model/model.h5')
     model.summary()
+
+    attack = config['Attack']['active']
+    attack_type = config['Attack']['type']
     adv_drv = AdversarialDriving(model, epsilon=EPSILON)
+    adv_drv.init(attack_type, int(attack))
     app = socketio.Middleware(sio, app)
     eventlet.wsgi.server(eventlet.listen(('', 4567)), app)
