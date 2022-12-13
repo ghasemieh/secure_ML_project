@@ -31,6 +31,7 @@ counter = 0
 EPSILON = 1
 APPLY_ATTACK = True
 speed_limit = MAX_SPEED
+file_path = "record.csv"
 
 
 class myAttacker:
@@ -82,77 +83,69 @@ def preprocess(image):
     return image
 
 
-file_path = "record.csv"
-
-
 @sio.on('telemetry')
 def telemetry(sid, data):
     if data:
         speed = float(data["speed"])
         sio.emit('update', {'data': data["image"], 'speed': data["speed"]})
         image = Image.open(BytesIO(base64.b64decode(data["image"])))
-        try:
-            image = np.asarray(image)
-            image = preprocess(image)
-            sio.emit('input', {'data': img2base64(image)})
-            y_true = model.predict(np.array([image]), batch_size=1)
-            if adv_drv.activate:
-                perturb = adv_drv.run(image)
-                if perturb is not None:
-                    x_adv = np.array(image) + perturb
-                    sio.emit('adv', {'data': img2base64(x_adv)})
-                    sio.emit('diff', {'data': img2base64(perturb)})
-                    y_adv = float(model.predict(np.array([x_adv]), batch_size=1))
-                    sio.emit('res', {'original': str(float(y_true)), 'result': str(float(y_adv)),
-                                     'percentage': str(float(((y_true - y_adv) * 100 / np.abs(y_true))))})
-                    df = pd.DataFrame(data=[[y_true[0][0], y_adv, y_adv - y_true[0][0]]],
-                                      columns=["y_true", "y_adv", "y_diff"])
-                    try:
-                        if os.path.isfile(file_path):
-                            df.to_csv(file_path, mode='a', header=False, index=False)
-                        else:
-                            df.to_csv(file_path, header=True, index=False)
-                    except:
-                        print("Close csv file")
-
-                    if APPLY_ATTACK:
-                        image = np.array([x_adv])
-                    else:
-                        image = np.array([image])
+        image = np.asarray(image)
+        image = preprocess(image)
+        sio.emit('input', {'data': img2base64(image)})
+        y_true = model.predict(np.array([image]), batch_size=1)
+        if adv_drv.activate:
+            perturb = adv_drv.run(image)
+            x_adv = np.array(image) + perturb
+            sio.emit('adv', {'data': img2base64(x_adv)})
+            sio.emit('diff', {'data': img2base64(perturb)})
+            y_adv = float(model.predict(np.array([x_adv]), batch_size=1))
+            sio.emit('res', {'original': str(float(y_true)), 'result': str(float(y_adv)),
+                             'percentage': str(float(((y_true - y_adv) * 100 / np.abs(y_true))))})
+            df = pd.DataFrame(data=[[y_true[0][0], y_adv, y_adv - y_true[0][0]]],
+                              columns=["y_true", "y_adv", "y_diff"])
+            try:
+                if os.path.isfile(file_path):
+                    df.to_csv(file_path, mode='a', header=False, index=False)
                 else:
-                    print("The attack method returns None")
-                    image = np.array([image])
-                telemetry.count = telemetry.count + 1
+                    df.to_csv(file_path, header=True, index=False)
+            except:
+                print("Close csv file")
+
+            if APPLY_ATTACK:
+                image = np.array([x_adv])
             else:
                 image = np.array([image])
-            steering_angle = float(model.predict(image, batch_size=1))
-            global speed_limit, counter
-            if speed > speed_limit:
-                speed_limit = MIN_SPEED
-            else:
-                speed_limit = MAX_SPEED
-            throttle = 1.0 - steering_angle ** 2 - (speed / speed_limit) ** 2
-            counter += 1
-            if counter % 1 == 0:
-                if not adv_drv.activate:
-                    print(Fore.WHITE + 'Steering angle: {}, Throttle: {}, Speed: {}'.format(round(steering_angle, 3),
-                                                                                            round(throttle, 2),
-                                                                                            round(speed, 1)))
-                elif adv_drv.attack_type == 'turn_left':
-                    print(Fore.RED + 'Steering angle: {}, Throttle: {}, Speed: {}'.format(round(steering_angle, 3),
-                                                                                          round(throttle, 2),
-                                                                                          round(speed, 1)))
-                elif adv_drv.attack_type == 'turn_right':
-                    print(Fore.GREEN + 'Steering angle: {}, Throttle: {}, Speed: {}'.format(round(steering_angle, 3),
-                                                                                            round(throttle, 2),
-                                                                                            round(speed, 1)))
-                elif adv_drv.attack_type == 'random':
-                    print(Fore.YELLOW + 'Steering angle: {}, Throttle: {}, Speed: {}'.format(round(steering_angle, 3),
-                                                                                             round(throttle, 2),
-                                                                                             round(speed, 1)))
-            send_control(steering_angle, throttle)
-        except Exception as e:
-            print(e)
+
+            telemetry.count = telemetry.count + 1
+        else:
+            image = np.array([image])
+        steering_angle = float(model.predict(image, batch_size=1))
+        global speed_limit, counter
+        if speed > speed_limit:
+            speed_limit = MIN_SPEED
+        else:
+            speed_limit = MAX_SPEED
+        throttle = 1.0 - steering_angle ** 2 - (speed / speed_limit) ** 2
+        counter += 1
+        if counter % 1 == 0:
+            if not adv_drv.activate:
+                print(Fore.WHITE + 'Steering angle: {}, Throttle: {}, Speed: {}'.format(round(steering_angle, 3),
+                                                                                        round(throttle, 2),
+                                                                                        round(speed, 1)))
+            elif adv_drv.attack_type == 'turn_left':
+                print(Fore.RED + 'Steering angle: {}, Throttle: {}, Speed: {}'.format(round(steering_angle, 3),
+                                                                                      round(throttle, 2),
+                                                                                      round(speed, 1)))
+            elif adv_drv.attack_type == 'turn_right':
+                print(Fore.GREEN + 'Steering angle: {}, Throttle: {}, Speed: {}'.format(round(steering_angle, 3),
+                                                                                        round(throttle, 2),
+                                                                                        round(speed, 1)))
+            elif adv_drv.attack_type == 'random':
+                print(Fore.YELLOW + 'Steering angle: {}, Throttle: {}, Speed: {}'.format(round(steering_angle, 3),
+                                                                                         round(throttle, 2),
+                                                                                         round(speed, 1)))
+        send_control(steering_angle, throttle)
+
     else:
         sio.emit('manual', data={}, skip_sid=True)
 
