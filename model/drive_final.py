@@ -5,6 +5,7 @@ import tensorflow as tf
 import cv2
 import configuration
 from configuration import ConfigParser
+
 tf.compat.v1.disable_eager_execution()
 import keras.backend as K
 import eventlet.wsgi
@@ -77,7 +78,6 @@ class AdversarialDriving:
 
     def attack(self, input):
         if self.attack_type == "random":
-            # Random Noises [-epsilon, +epsilon]
             noise = (np.random.randint(2, size=(160, 320, 3)) - 1) * self.epsilon
             return noise
 
@@ -97,11 +97,6 @@ def img2base64(image):
 def connect(sid, environ):
     print("connect ", sid)
     send_control(0, 0)
-
-
-# @sio.on('attack')
-# def onAttack(sid, data):
-#     adv_drv.init(data["type"], int(data["attack"]))
 
 
 def preprocess(image):

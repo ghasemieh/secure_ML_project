@@ -37,20 +37,6 @@ class __Config:
 
     @property
     def get(self) -> ConfigParser:
-        """
-        Gets a ConfigParser
-        :return:
-        """
-        # assert self.__env_var_name in os.environ, self.__error_no_active_profile_set
-        #
-        # profile = os.environ[self.__env_var_name]
-        # profile_config_path = self.__path_to_config.format(profile)
-        #
-        # assert os.path.isfile(profile_config_path), self.__error_no_file_matching_active_profile.format(
-        #     profile, profile_config_path, os.getcwd())
-        #
-        # cp = ConfigParser()
-        # cp.read(self.__path_to_config.format(profile))
         cp = ConfigParser()
         cp.read(self.__path_to_config.format('dev'))
         return cp
