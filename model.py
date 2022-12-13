@@ -78,7 +78,7 @@ def batch_generator(data_dir, image_paths, steering_angles, batch_size, is_train
         yield images, steers
 
 np.random.seed(0)
-data_df = pd.read_csv(os.path.join(os.getcwd(), "./", 'driving_log.csv'),
+data_df = pd.read_csv(os.path.join(os.getcwd(), "model/", 'driving_log.csv'),
                       names=['center', 'left', 'right', 'steering', 'throttle', 'reverse', 'speed'])
 X = data_df[['center', 'left', 'right']]
 X = X.drop(X.index[0])
@@ -103,6 +103,6 @@ model.add(Dense(1))
 print(model.summary())
 checkpoint = ModelCheckpoint('model-{epoch:03d}.h5', monitor='val_loss', verbose=0, save_best_only=True, mode='auto')
 model.compile(loss='mean_squared_error', optimizer=Adam(lr=0.001))
-model.fit(batch_generator("./", X_train, y_train, 64, True), steps_per_epoch=64, epochs=200,
-          max_queue_size=1, validation_data=batch_generator("./", X_valid, y_valid, 64, False),
+model.fit(batch_generator("model/", X_train, y_train, 64, True), steps_per_epoch=64, epochs=200,
+          max_queue_size=1, validation_data=batch_generator("model/", X_valid, y_valid, 64, False),
           validation_steps=len(X_valid), callbacks=[checkpoint], verbose=1)

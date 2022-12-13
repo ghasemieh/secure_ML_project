@@ -7,6 +7,7 @@ import cv2
 import configuration
 from configuration import ConfigParser
 import pandas as pd
+
 tf.compat.v1.disable_eager_execution()
 import keras.backend as K
 import eventlet.wsgi
@@ -18,8 +19,6 @@ from flask import Flask
 from flask_cors import CORS
 from keras.models import load_model
 
-np.set_printoptions(suppress=True)
-log_dir = 'logs/' + datetime.now().strftime("%Y%m%d-%H%M%S")
 sio = socketio.Server(cors_allowed_origins='*')
 
 app = Flask(__name__)
@@ -101,7 +100,10 @@ def preprocess(image):
     image = cv2.cvtColor(image, cv2.COLOR_RGB2YUV)
     return image
 
+
 file_path = "record.csv"
+
+
 @sio.on('telemetry')
 def telemetry(sid, data):
     if data:
@@ -122,11 +124,15 @@ def telemetry(sid, data):
                     y_adv = float(model.predict(np.array([x_adv]), batch_size=1))
                     sio.emit('res', {'original': str(float(y_true)), 'result': str(float(y_adv)),
                                      'percentage': str(float(((y_true - y_adv) * 100 / np.abs(y_true))))})
-                    df = pd.DataFrame(data=[[y_true[0][0], y_adv, y_adv - y_true[0][0]]], columns=["y_true", "y_adv", "y_diff"])
-                    if os.path.isfile(file_path):
-                        df.to_csv(file_path, mode='a', header=False, index=False)
-                    else:
-                        df.to_csv(file_path, header=True, index=False)
+                    df = pd.DataFrame(data=[[y_true[0][0], y_adv, y_adv - y_true[0][0]]],
+                                      columns=["y_true", "y_adv", "y_diff"])
+                    try:
+                        if os.path.isfile(file_path):
+                            df.to_csv(file_path, mode='a', header=False, index=False)
+                        else:
+                            df.to_csv(file_path, header=True, index=False)
+                    except:
+                        print("Close csv file")
 
                     if APPLY_ATTACK:
                         image = np.array([x_adv])
@@ -176,11 +182,9 @@ def send_control(steering_angle, throttle):
 
 if __name__ == '__main__':
     config: ConfigParser = configuration.get()
-
     telemetry.count = 0
-    model = load_model('model/model.h5')
+    model = load_model('model.h5')
     model.summary()
-
     attack = config['Attack']['active']
     attack_type = config['Attack']['type']
     adv_drv = AdversarialDriving(model, epsilon=EPSILON)

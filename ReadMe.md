@@ -18,7 +18,7 @@
 
 #### 6) Run the command below in project root directory 
 ```
-python3 drive_final.py ACTIVE_PROFILE=dev
+python3 app.py ACTIVE_PROFILE=dev
 ```
 
 Once the application starts the car starts moving and based on the configuration in config file it acts.
