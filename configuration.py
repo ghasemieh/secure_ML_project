@@ -5,7 +5,7 @@ ConfigParser through which configuration values can be accessed
 The ``ACTIVE_PROFILE`` environment variable must be set to
 a valid profile because there is no default configuration
 
-A valid profile is one for which a ``Kilo-{profile}.config`` file
+A valid profile is one for which a ``drive-{profile}.config`` file
 exists in the project root
 """
 
@@ -14,7 +14,7 @@ from configparser import ConfigParser
 
 
 class __Config:
-    __path_to_config = 'kilo-{}.config'
+    __path_to_config = 'drive-{}.config'
 
     __env_var_name = 'ACTIVE_PROFILE'
 
@@ -26,7 +26,7 @@ class __Config:
 
             'ACTIVE_PROFILE'
 
-        A valid profile is one for which a 'stock-observer-{profile}.config file
+        A valid profile is one for which a 'drive-{profile}.config file
         exists in the project root
         """
 
